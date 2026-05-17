@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    environment: production
+---
+# Install via Helm:
+# helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+# helm repo update
+# helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+#   --namespace monitoring \
+#   --set grafana.adminPassword="DevOps123!" \
+#   --set prometheus.prometheusSpec.retention=15d \
+#   --set prometheus.prometheusSpec.resources.requests.memory=256Mi \
+#   --set prometheus.prometheusSpec.resources.requests.cpu=100m \
+#   --set alertmanager.enabled=true
+#
+# Install Loki for log aggregation:
+# helm repo add grafana https://grafana.github.io/helm-charts
+# helm install loki grafana/loki-stack \
+#   --namespace monitoring \
+#   --set promtail.enabled=true \
+#   --set loki.persistence.enabled=true \
+#   --set loki.persistence.size=10Gi
+#
+# Access Grafana:
+# kubectl port-forward svc/kube-prometheus-stack-grafana 3000:80 -n monitoring

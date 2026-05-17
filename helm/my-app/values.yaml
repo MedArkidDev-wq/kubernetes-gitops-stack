@@ -1,0 +1,47 @@
+replicaCount: 2
+
+image:
+  repository: moarkid/devops-app
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 5000
+
+resources:
+  requests:
+    memory: "64Mi"
+    cpu: "50m"
+  limits:
+    memory: "128Mi"
+    cpu: "200m"
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+probes:
+  liveness:
+    path: /health
+    port: 5000
+    initialDelaySeconds: 10
+    periodSeconds: 15
+  readiness:
+    path: /health
+    port: 5000
+    initialDelaySeconds: 5
+    periodSeconds: 5
+
+monitoring:
+  enabled: true
+  serviceMonitor: true
+  metricsPath: /metrics
+  metricsPort: 5000
+
+environment: production
+logLevel: INFO
