@@ -1,251 +1,124 @@
-# Production-Grade Kubernetes GitOps Stack
+# Kubernetes GitOps with ArgoCD
 
-> **Git is the single source of truth.** Every change to this repo is automatically applied to the cluster via ArgoCD. Full metrics + logging observability included.
+Change a YAML file, push to Git, and the cluster updates itself. No `kubectl apply`, no SSH, no manual anything.
 
-![Kubernetes](https://img.shields.io/badge/Kubernetes-k3s-326CE5?style=flat&logo=kubernetes&logoColor=white)
-![ArgoCD](https://img.shields.io/badge/ArgoCD-GitOps-EF7B4D?style=flat&logo=argo&logoColor=white)
-![Helm](https://img.shields.io/badge/Helm-Charts-0F1689?style=flat&logo=helm&logoColor=white)
-![Last Commit](https://img.shields.io/github/last-commit/MedArkidDev-wq/kubernetes-gitops-stack)
+This project runs a k3s cluster with ArgoCD watching this repo. When you change something (like bumping replicas from 2 to 4), ArgoCD picks it up within 3 minutes and syncs the cluster. It also auto-fixes drift, so if someone manually changes something in the cluster, ArgoCD reverts it back to what's in Git.
 
-## What This Project Does
+The stack includes a frontend (Nginx), a backend (Flask API that auto-scales from 2 to 10 pods), and full monitoring with Prometheus, Grafana, and Loki.
 
-A Kubernetes cluster where Git is the single source of truth. Push a change to this repo — ArgoCD detects it, syncs it to the cluster, and your application updates automatically. Includes HPA auto-scaling, Helm charts, and full Prometheus/Grafana/Loki observability. Zero `kubectl apply` needed after initial setup.
-
-## Architecture
-
-```
-Developer pushes to Git
-         |
-         v
-  +------+------+
-  |   ArgoCD    |  Watches repo every 3 min
-  |   GitOps    |  Detects drift, auto-syncs
-  +------+------+
-         |
-         v
-  +------+------+
-  |  Kubernetes |  k3s cluster
-  |   Cluster   |
-  +------+------+
-         |
-    +----+----+----+
-    |    |    |    |
-    v    v    v    v
-  Front  Back  DB  Monitoring
-  end    end       (Prometheus
-  (2)   (2-10)     + Grafana
-                   + Loki)
-```
-
-## Stack
-
-| Component | Technology | Purpose |
-|---|---|---|
-| **Cluster** | k3s | Lightweight Kubernetes on any machine |
-| **GitOps** | ArgoCD | Auto-sync from Git to cluster |
-| **Scaling** | HPA (Horizontal Pod Autoscaler) | 2-10 replicas based on CPU/memory |
-| **Packaging** | Helm | Templated, reusable Kubernetes charts |
-| **Metrics** | kube-prometheus-stack | Prometheus + Grafana + AlertManager |
-| **Logs** | Loki + Promtail | Log aggregation and search |
-| **Frontend** | Nginx (2 replicas) | Static content + load balancing |
-| **Backend** | Flask API (2-10 replicas) | REST API with Prometheus metrics |
-
-## Project Structure
+## What's in here
 
 ```
 kubernetes-gitops-stack/
 ├── apps/
+│   ├── namespace.yaml              # production namespace
 │   ├── frontend/
-│   │   ├── deployment.yaml         # 2 replicas, nginx:1.25-alpine
-│   │   └── service.yaml            # LoadBalancer type
-│   ├── backend/
-│   │   ├── deployment.yaml         # 2 replicas, health probes, resource limits
-│   │   ├── service.yaml            # ClusterIP (internal only)
-│   │   └── hpa.yaml                # Auto-scale 2-10 pods on CPU > 70%
-│   └── database/
-│       ├── statefulset.yaml
-│       └── service.yaml
+│   │   ├── deployment.yaml         # 2 Nginx replicas
+│   │   └── service.yaml            # LoadBalancer
+│   └── backend/
+│       ├── deployment.yaml         # 2 replicas, resource limits, health probes
+│       ├── service.yaml            # ClusterIP (internal traffic only)
+│       └── hpa.yaml                # Scales 2-10 pods based on CPU/memory
 ├── infrastructure/
-│   ├── argocd/
-│   │   └── application.yaml        # GitOps application definition
-│   └── monitoring/
-│       └── kube-prometheus-stack.yaml
-├── helm/
-│   └── my-app/
-│       ├── Chart.yaml              # Helm chart metadata
-│       ├── values.yaml             # Default configuration
-│       └── templates/
-│           └── deployment.yaml     # Templated deployment
+│   ├── argocd/application.yaml     # Tells ArgoCD to watch the apps/ folder
+│   └── monitoring/                 # Helm install commands for the monitoring stack
+├── helm/my-app/
+│   ├── Chart.yaml
+│   ├── values.yaml                 # All the knobs you can turn
+│   └── templates/                  # Deployment, Service, HPA templates
 └── README.md
 ```
 
-## Backend Deployment (Key Features)
+## How GitOps actually works here
 
-```yaml
-spec:
-  replicas: 2
-  template:
-    metadata:
-      annotations:
-        prometheus.io/scrape: "true"     # Auto-discovered by Prometheus
-        prometheus.io/port: "5000"
-    spec:
-      containers:
-        - name: backend
-          resources:
-            requests: { memory: "64Mi", cpu: "50m" }
-            limits: { memory: "128Mi", cpu: "200m" }
-          livenessProbe:
-            httpGet: { path: /health, port: 5000 }
-          readinessProbe:
-            httpGet: { path: /health, port: 5000 }
-```
+ArgoCD watches the `apps/` directory. When you push a change:
 
-## HPA Auto-Scaling
-
-```yaml
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-spec:
-  minReplicas: 2
-  maxReplicas: 10
-  metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target: { type: Utilization, averageUtilization: 70 }
-    - type: Resource
-      resource:
-        name: memory
-        target: { type: Utilization, averageUtilization: 80 }
-```
-
-## ArgoCD GitOps Configuration
-
-```yaml
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-spec:
-  source:
-    repoURL: https://github.com/MedArkidDev-wq/kubernetes-gitops-stack.git
-    targetRevision: HEAD
-    path: apps
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: production
-  syncPolicy:
-    automated:
-      prune: true        # Delete resources removed from Git
-      selfHeal: true     # Auto-fix manual cluster changes
-```
-
-**The GitOps magic:**
 ```bash
-# Change replicas: 2 -> 4 in apps/backend/deployment.yaml
-git commit -am "scale: increase backend to 4 replicas"
+# Say you want to scale the backend to 4 replicas
+# Edit apps/backend/deployment.yaml: replicas: 2 -> replicas: 4
+git commit -am "scale backend to 4"
 git push
 
-# ArgoCD detects change within 3 minutes
-# Pods scale from 2 to 4 automatically
-# Zero kubectl commands needed
+# ArgoCD detects the change within 3 minutes
+# Pods go from 2 to 4 automatically
+# You never ran a single kubectl command
 ```
 
-## Monitoring Stack (Helm)
+If someone manually scales to 6 pods using `kubectl`, ArgoCD will notice the drift and scale it back to 4 (because that's what Git says). That's the selfHeal setting.
 
-```bash
-helm install kube-prometheus-stack \
-  prometheus-community/kube-prometheus-stack \
-  --namespace monitoring \
-  --set grafana.adminPassword="DevOps123!" \
-  --set prometheus.prometheusSpec.retention=15d
+## The backend deployment
 
-helm install loki grafana/loki-stack \
-  --namespace monitoring \
-  --set promtail.enabled=true
-```
-
-## Custom Helm Chart
+The backend has proper production settings. Resource limits so a runaway pod can't eat the whole node, health probes so K8s knows when to restart or stop sending traffic, and Prometheus annotations so metrics get scraped automatically.
 
 ```yaml
-# helm/my-app/values.yaml
-replicaCount: 2
-image:
-  repository: my-devops-app
-  tag: latest
-service:
-  type: ClusterIP
-  port: 80
-autoscaling:
-  enabled: true
-  minReplicas: 2
-  maxReplicas: 10
-monitoring:
-  enabled: true
-  serviceMonitor: true
+resources:
+  requests: { memory: "64Mi", cpu: "50m" }
+  limits: { memory: "128Mi", cpu: "200m" }
+livenessProbe:
+  httpGet: { path: /health, port: 5000 }
+readinessProbe:
+  httpGet: { path: /health, port: 5000 }
 ```
 
+## Auto-scaling
+
+The HPA watches CPU and memory. When CPU goes above 70% or memory above 80%, it adds pods. When load drops, it scales back down (slowly, with a 5-minute cooldown to avoid flapping).
+
+Min 2 pods, max 10. It adds up to 2 pods per minute when scaling up, and removes 1 pod every 2 minutes when scaling down.
+
+## The Helm chart
+
+There's also a full Helm chart in `helm/my-app/` if you want to deploy with Helm instead of raw manifests. All the settings (replicas, resources, probes, autoscaling) are configurable through `values.yaml`.
+
 ```bash
-helm lint helm/my-app                           # Validate
-helm install my-app helm/my-app -n production   # Deploy
-helm upgrade my-app helm/my-app --set replicaCount=3  # Scale
-helm rollback my-app 1                          # Rollback
+helm install my-app helm/my-app -n production
+helm upgrade my-app helm/my-app --set replicaCount=3
+helm rollback my-app 1
 ```
 
-## Quick Start
+## Get it running
 
 ```bash
-# 1. Install k3s
+# Install k3s (takes about 30 seconds)
 curl -sfL https://get.k3s.io | sh -
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
-# 2. Install ArgoCD
+# Install ArgoCD
 kubectl create namespace argocd
 kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 
-# 3. Get ArgoCD password
+# Get the admin password
 kubectl get secret argocd-initial-admin-secret -n argocd \
   -o jsonpath="{.data.password}" | base64 -d
 
-# 4. Access ArgoCD UI
+# Open the ArgoCD UI
 kubectl port-forward svc/argocd-server -n argocd 8080:443 &
-# https://localhost:8080
+# Go to https://localhost:8080, login with admin + the password above
 
-# 5. Apply the GitOps application
+# Tell ArgoCD to watch this repo
 kubectl create namespace production
 kubectl apply -f infrastructure/argocd/application.yaml
-
-# 6. Install monitoring
-helm install kube-prometheus-stack \
-  prometheus-community/kube-prometheus-stack -n monitoring
-kubectl port-forward svc/kube-prometheus-stack-grafana 3000:80 -n monitoring &
 ```
 
-## Testing GitOps
+After that, any push to this repo automatically updates the cluster.
+
+## Testing the auto-scaler
 
 ```bash
-# Verify ArgoCD sync
-argocd app list
-# production-app — Synced — Healthy
-
-# Test auto-scaling
+# Generate load to trigger HPA
 kubectl run load-test --image=busybox --rm -it --restart=Never -- \
   /bin/sh -c "while sleep 0.01; do wget -q -O- http://backend-api-service/slow; done"
 
-# Watch HPA add pods
+# Watch pods scale up in another terminal
 kubectl get hpa -n production --watch
 ```
 
 ## Cost
 
-**$0** — k3s runs on any machine (laptop, VM, Raspberry Pi).
+$0. k3s runs on any Linux machine, your laptop, a VM, even a Raspberry Pi.
 
-## Author
+## About
 
-**Mohamed Arkid** — DevOps Engineer and Cloud Consultant
+Built by [Mohamed Arkid](https://moarkid.com). DevOps engineer. I automate things so I don't have to touch them again.
 
-- [moarkid.com](https://moarkid.com)
-- [LinkedIn](https://www.linkedin.com/in/mohamed-arkid)
-
-## License
-
-MIT
+MIT License
